@@ -10,6 +10,9 @@ export function getRedisClient(): Redis {
     redisClient = new Redis(config.redisUrl, {
       maxRetriesPerRequest: null,
       retryStrategy(times: number) {
+        if (process.env.NODE_ENV === 'test') {
+          return null;
+        }
         const delay = Math.min(times * 50, 2000);
         logger.warn(`Redis connection failed, retrying in ${delay}ms... (attempt ${times})`);
         return delay;
