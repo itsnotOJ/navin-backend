@@ -1,22 +1,29 @@
-import { describe, it, expect } from '@jest/globals';
+﻿import { describe, it, expect } from '@jest/globals';
 import { spawn } from 'node:child_process';
 
 function runWithEnv(
   extra: Record<string, string> = {}
 ): Promise<{ code: number | null; stderr: string }> {
-  const baseEnv: Record<string, string> = {
+  const baseEnv: Record<string, string | undefined> = {
+    ...process.env,
     NODE_ENV: 'test',
     PORT: '3000',
     MONGO_URI: 'mongodb://127.0.0.1:27017/navin_test',
     JWT_SECRET: 'a-very-long-test-secret-that-is-32-chars',
     REDIS_URL: 'redis://127.0.0.1:6379',
     STELLAR_NETWORK: 'testnet',
+    // Clear optional secrets that dotenv may inject with invalid placeholders
+    STELLAR_SECRET_KEY: undefined,
+    STELLAR_WEBHOOK_SECRET: undefined,
+    SMTP_FROM: undefined,
+    SENTRY_DSN: undefined,
+    FRONTEND_URL: undefined,
     ...extra,
   };
 
   return new Promise(resolve => {
-    const child = spawn(process.execPath, ['--input-type=module', '-e', 'import "../env.js";'], {
-      env: { ...process.env, ...baseEnv },
+    const child = spawn(process.execPath, ['--input-type=module', '-e', 'import "./dist/src/env.js";'], {
+      env: baseEnv as NodeJS.ProcessEnv,
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 10_000,
     });
@@ -38,7 +45,8 @@ function runWithEnv(
 
 describe('env validation', () => {
   it('succeeds with all required vars present', async () => {
-    const { code } = await runWithEnv();
+    const { code, stderr } = await runWithEnv();
+    expect(stderr).toBe('');
     expect(code).toBe(0);
   });
 
@@ -53,7 +61,7 @@ describe('env validation', () => {
   });
 
   it('accepts optional vars without error', async () => {
-    const { code } = await runWithEnv({
+    const { code, stderr } = await runWithEnv({
       SMTP_HOST: 'smtp.example.com',
       SMTP_PORT: '587',
       TWILIO_SID: 'AC123',
@@ -61,6 +69,7 @@ describe('env validation', () => {
       SENTRY_DSN: 'https://examplePublicKey@o0.ingest.sentry.io/0',
       FRONTEND_URL: 'http://localhost:5173',
     });
+    expect(stderr).toBe('');
     expect(code).toBe(0);
   });
 
