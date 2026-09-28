@@ -87,10 +87,9 @@ paths:
         1. **Normalize** — union payload → canonical fields (`normalizeIotWebhookBody`)
         2. **Persist** — MongoDB telemetry with `anchorStatus=PENDING_ANCHOR` and `dataHash`
         3. **Queue** — enqueue BullMQ job on `transaction_queue` (`anchor_telemetry`)
-        4. **Emit socket** — `telemetry_update` to the shipment room
-        5. **Detect anomaly** (async `setImmediate`) — thresholds default to **maxTemp=25°C / maxHumidity=80% / minBatteryLevel=20%**
-           (operational defaults; not the legacy 85/90 hardcodes on `GET /api/telemetry/thresholds`)
-        6. **Alert** — on detection, emit `anomaly_detected` and push to `alert_queue`
+        4. **Emit socket** — `location:update` to the shipment room
+        5. **Detect anomaly** (async `setImmediate` → `detectTelemetryAnomalies`) — org/shipment thresholds default to **maxTemp=25°C / maxHumidity=80% / minBatteryLevel=20%**; types `TEMPERATURE_BREACH` / `HUMIDITY_BREACH` / `SHOCK_EVENT` / `GPS_LOST` / `BATTERY_LOW` at severity `HIGH`
+        6. **Alert** — on detection, emit `anomaly:detected` and push to `alert_queue`
 
         Returns **202 Accepted** as soon as the record is stored and the anchor job is queued.
         Stellar anchoring is completed by `stellar.worker` consuming `transaction_queue`.
@@ -249,6 +248,18 @@ paths:
                         type: string
                         format: date-time
                         description: Current UTC timestamp
+        '400':
+          description: Invalid request (should not occur for this endpoint)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/notifications:
     get:
       tags: [Notifications]
@@ -721,11 +732,10 @@ paths:
       tags: [Public Tracking]
       summary: Public shipment tracking by tracking number
       description: |
-        **NOT IMPLEMENTED** — stub for frontend discovery.
-
-        Unauthenticated public tracking surface expected by the frontend.
-        No dedicated implementing issue yet (planned alongside shipments UX).
-      x-implemented: false
+        Unauthenticated public tracking endpoint. Returns a safe subset of shipment
+        data suitable for public tracking pages. No authentication required.
+        Rate limited to prevent abuse.
+      x-implemented: true
       security: []
       parameters:
         - in: path
@@ -733,9 +743,42 @@ paths:
           required: true
           schema:
             type: string
+          description: Carrier tracking number (e.g., NVN-123456)
       responses:
-        '501':
-          description: Not implemented
+        '200':
+          description: Shipment tracking information retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message, data]
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Shipment tracking retrieved
+                  data:
+                    $ref: '#/components/schemas/PublicTrackingResponse'
+        '404':
+          description: Shipment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '400':
+          description: Invalid tracking number parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Too many requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /api/events:
     get:
@@ -1438,6 +1481,18 @@ paths:
                         type: boolean
                       nextCursor:
                         type: string
+        '401':
+          description: Missing, invalid, or revoked JWT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - insufficient role (requires ADMIN)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/company/invitations/{id}/resend:
     post:
       summary: Resend invitation
@@ -1475,6 +1530,24 @@ paths:
                       expiresAt:
                         type: string
                         format: date-time
+        '401':
+          description: Missing, invalid, or revoked JWT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - insufficient role (requires ADMIN)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Invitation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/company/invitations/{id}:
     delete:
       summary: Revoke invitation
@@ -1504,6 +1577,24 @@ paths:
                     type: string
                   data:
                     type: object
+        '401':
+          description: Missing, invalid, or revoked JWT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - insufficient role (requires ADMIN)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Invitation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/company/invitations/info:
     get:
       summary: Get invitation info from token
@@ -2209,6 +2300,66 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/auth/reset-password:
+    post:
+      summary: Reset a password with a reset token
+      description: >-
+        Completes the password-reset flow started by
+        `POST /api/auth/forgot-password`. Exchanges the emailed reset token for
+        a new password and invalidates the token. Public route (no bearer token
+        required); rate-limited per IP.
+      tags:
+        - Auth
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - token
+                - newPassword
+              properties:
+                token:
+                  type: string
+                  minLength: 1
+                  description: Reset token from the password-reset email link
+                newPassword:
+                  type: string
+                  minLength: 8
+                  description: Replacement password (at least 8 characters)
+      responses:
+        '200':
+          description: Password reset successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Password reset successfully
+                  data:
+                    type: string
+                    nullable: true
+        '400':
+          description: >-
+            Validation error (missing/short token or password) or invalid,
+            expired, or wrong-type reset token (`ERR_AUTH_INVALID_RESET_TOKEN`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Too many reset attempts — rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/auth/2fa/setup:
     post:
       summary: Initiate TOTP 2FA setup
@@ -2421,15 +2572,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /api/auth/api-keys/{id}:
+  /api/auth/api-keys/{organizationId}:
     get:
       summary: List API keys for an organization
-      description: Returns all active API keys for the specified organization (without exposing the raw keys)
+      description: >-
+        Deprecated alias of `GET /api/company/api-keys`. Returns all active API
+        keys for the specified organization (without exposing the raw keys).
+        Requires JWT auth plus ADMIN or SUPER_ADMIN role.
+      tags:
+        - Auth
       security:
         - bearerAuth: []
+      x-required-role: [ADMIN, SUPER_ADMIN]
       parameters:
         - in: path
-          name: id
+          name: organizationId
           required: true
           schema:
             type: string
@@ -2469,14 +2626,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Insufficient role permissions (ADMIN / SUPER_ADMIN required)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/auth/api-keys/{apiKeyId}:
     delete:
       summary: Revoke an API key
-      description: Deactivates an API key, preventing it from being used for authentication
+      description: >-
+        Deprecated alias of `DELETE /api/company/api-keys/{apiKeyId}`.
+        Deactivates an API key, preventing it from being used for
+        authentication. Requires JWT auth plus ADMIN or SUPER_ADMIN role.
+      tags:
+        - Auth
       security:
         - bearerAuth: []
+      x-required-role: [ADMIN, SUPER_ADMIN]
       parameters:
         - in: path
-          name: id
+          name: apiKeyId
           required: true
           schema:
             type: string
@@ -2493,6 +2663,12 @@ paths:
                     type: string
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Insufficient role permissions (ADMIN / SUPER_ADMIN required)
           content:
             application/json:
               schema:
@@ -3135,6 +3311,24 @@ paths:
                               type: integer
                             anomalyCount:
                               type: integer
+        '400':
+          description: Invalid query parameters (e.g., invalid date format, startDate after endDate)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing, invalid, or revoked JWT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - insufficient role (must be ADMIN / MANAGER / SUPER_ADMIN)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/analytics/summary:
     get:
       summary: Get KPI summary with 30-day sparklines
@@ -3428,6 +3622,67 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/payments/summary:
+    get:
+      summary: Get settlement summary (legacy payments alias)
+      description: |
+        Legacy alias of `GET /api/settlements/summary` — both `/api/payments` and
+        `/api/settlements` resolve to the same router. Returns aggregated
+        settlement totals and a per-day sparkline array for the chosen period.
+        Results are cached in Redis for 5 minutes.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: period
+          schema:
+            type: string
+            enum: [week, month, quarter]
+            default: week
+          description: Aggregation window. `week`=7 days, `month`=30 days, `quarter`=90 days.
+      responses:
+        '200':
+          description: Summary retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      totalReleased:
+                        type: number
+                        description: Sum of released settlement amounts in the period.
+                      totalInEscrow:
+                        type: number
+                        description: Sum of escrowed settlement amounts in the period.
+                      totalPending:
+                        type: number
+                        description: Sum of pending settlement amounts in the period.
+                      sparkline:
+                        type: array
+                        items:
+                          type: number
+                        description: One entry per day in the period (released amounts per day).
+                      period:
+                        type: string
+                        enum: [week, month, quarter]
+        '400':
+          description: Invalid period value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/payments/{id}:
     get:
       summary: Get payment / settlement by ID
@@ -3544,6 +3799,77 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/payments/{id}/dispute:
+    post:
+      summary: Dispute a payment / settlement (legacy payments alias)
+      description: |
+        Legacy alias of `POST /api/settlements/{id}/dispute` — both `/api/payments`
+        and `/api/settlements` resolve to the same router. Transitions the
+        settlement status to `Disputed` and records dispute metadata
+        (`disputedAt`, `disputeReason`, `additionalNotes`) in `escrowRelease`.
+        Requires JWT auth and ADMIN or MANAGER role.
+      security:
+        - bearerAuth: []
+      x-required-role: [ADMIN, MANAGER]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            minLength: 1
+          description: Payment / settlement ObjectId.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - reason
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  description: Reason for the dispute.
+                notes:
+                  type: string
+                  description: Optional additional context.
+      responses:
+        '200':
+          description: Settlement disputed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/Settlement'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Forbidden — requires ADMIN or MANAGER role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Payment not found (`ERR_PAYMENT_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /api/settlements:
     get:
       summary: List settlements
@@ -3629,6 +3955,82 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+    post:
+      summary: Create a settlement
+      description: |
+        Creates a settlement record tied to a shipment. Canonical settlement
+        creation endpoint — `/api/payments` shares this router, so this operation
+        is contract-identical to `POST /api/payments`.
+        Requires JWT auth and ADMIN or SUPER_ADMIN.
+        Provide `token` (preferred) or legacy `tokenType` (`XLMN` | `USDC` | `Other`).
+      security:
+        - bearerAuth: []
+      x-required-role: [ADMIN, SUPER_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - shipmentId
+                - amount
+              properties:
+                shipmentId:
+                  type: string
+                  minLength: 1
+                  description: MongoDB ObjectId of the related shipment.
+                amount:
+                  type: number
+                  minimum: 0
+                  exclusiveMinimum: true
+                  description: Positive settlement amount.
+                token:
+                  type: string
+                  enum: [XLMN, USDC, Other]
+                  description: Preferred on-chain asset field.
+                tokenType:
+                  type: string
+                  enum: [XLMN, USDC, Other]
+                  description: Deprecated alias for token (backward compatibility).
+                payerAddress:
+                  type: string
+                payeeAddress:
+                  type: string
+                status:
+                  type: string
+                  enum: [Pending, Escrowed, Released, Failed, Disputed]
+                  default: Pending
+      responses:
+        '201':
+          description: Settlement created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                    example: Payment created successfully
+                  data:
+                    $ref: '#/components/schemas/Settlement'
+        '400':
+          description: Validation error (e.g. missing token/tokenType, non-positive amount)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Insufficient role permissions (ADMIN / SUPER_ADMIN required)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /api/settlements/summary:
     get:
@@ -3722,6 +4124,76 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           description: Settlement not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/settlements/{id}/status:
+    patch:
+      summary: Update settlement status
+      description: |
+        Canonical settlement status transition — contract-identical to
+        `PATCH /api/payments/{id}/status` (both paths share the payments router).
+        Advances settlement lifecycle status and optionally records
+        `stellarTxHash`. Requires JWT auth and ADMIN or SUPER_ADMIN.
+      security:
+        - bearerAuth: []
+      x-required-role: [ADMIN, SUPER_ADMIN]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            minLength: 1
+          description: Settlement ObjectId.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum: [Pending, Escrowed, Released, Failed, Disputed]
+                stellarTxHash:
+                  type: string
+                  description: Optional on-chain transaction hash for audit.
+      responses:
+        '200':
+          description: Settlement status updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                    example: Payment status updated successfully
+                  data:
+                    $ref: '#/components/schemas/Settlement'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Insufficient role permissions (ADMIN / SUPER_ADMIN required)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Settlement not found (`ERR_PAYMENT_NOT_FOUND`)
           content:
             application/json:
               schema:
@@ -3898,6 +4370,24 @@ paths:
                         type: boolean
                       page:
                         type: integer
+        '400':
+          description: Invalid query parameters (e.g., invalid date format, both cursor and page provided)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing, invalid, or revoked JWT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - insufficient permissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/telemetry/bulk:
     post:
       summary: Bulk ingest telemetry readings
@@ -4509,6 +4999,30 @@ paths:
                     example: Shipment created
                   data:
                     $ref: '#/components/schemas/Shipment'
+        '400':
+          description: Validation error - invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing, invalid, or revoked JWT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - insufficient role (requires ADMIN / MANAGER)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Duplicate tracking number
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/shipments/{id}:
     get:
       summary: Get a single shipment by ID
@@ -4588,6 +5102,30 @@ paths:
       responses:
         '200':
           description: Shipment updated
+        '400':
+          description: Validation error - invalid request body or path parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing, invalid, or revoked JWT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - insufficient role (requires ADMIN / MANAGER)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Shipment not found (`ERR_SHIPMENT_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     delete:
       summary: Delete a shipment
       description: Soft-delete a shipment. Requires ADMIN or MANAGER role.
@@ -4979,27 +5517,48 @@ paths:
                   message:
                     type: string
                   data:
+                    # Mirrors the `ShipmentEtaPayload` discriminated union in
+                    # src/modules/shipments/shipmentsEta.cache.ts. The two
+                    # branches are mutually exclusive: each closes its object
+                    # (`additionalProperties: false`) and requires a property
+                    # the other branch forbids, so no response can satisfy
+                    # both.
                     oneOf:
-                      - type: object
+                      - title: Estimated arrival (shipment is in transit)
+                        type: object
+                        additionalProperties: false
+                        required:
+                          - estimatedArrival
+                          - distanceRemaining
+                          - averageSpeed
+                          - confidence
                         properties:
                           estimatedArrival:
                             type: string
                             format: date-time
                           distanceRemaining:
                             type: number
+                            description: Kilometres remaining to the destination.
                           averageSpeed:
                             type: number
+                            description: Average speed in km/h over the telemetry window.
                           confidence:
                             type: string
                             enum: [LOW, MEDIUM, HIGH]
-                      - type: object
+                      - title: ETA unavailable (shipment is not in transit)
+                        type: object
+                        additionalProperties: false
+                        required:
+                          - estimatedArrival
+                          - reason
                         properties:
                           estimatedArrival:
                             type: string
-                            format: date-time
                             nullable: true
+                            description: Always `null` in this branch.
                           reason:
                             type: string
+                            description: Human-readable explanation of why no ETA was computed.
         '400':
           description: Missing destination coordinates or invalid request data
         '401':
@@ -6178,8 +6737,17 @@ components:
           nullable: true
           description: Stellar explorer URL for the transaction (computed).
         escrowRelease:
-          $ref: '#/components/schemas/EscrowRelease'
+          # OAS 3.0 has no `oneOf: [{$ref}, null]`, and a `nullable` sibling
+          # next to `$ref` is ignored per JSON Reference semantics. Wrapping the
+          # reference in `allOf` and declaring `type` keeps the nullability
+          # meaningful for generated clients and validators.
+          type: object
+          description: >-
+            Escrow release outcome; `null` while the escrow has not been
+            released, disputed, or otherwise finalised.
           nullable: true
+          allOf:
+            - $ref: '#/components/schemas/EscrowRelease'
         createdAt:
           type: string
           format: date-time
@@ -6626,6 +7194,61 @@ components:
           type: object
           additionalProperties: true
           description: Source-specific fields (status, telemetryId, stellarTxHash, proof URL, etc.)
+    PublicTrackingMilestone:
+      type: object
+      required: [id, label, status, timestamp, isCompleted]
+      description: A single milestone in the public tracking timeline.
+      properties:
+        id:
+          type: string
+          description: Unique milestone identifier.
+        label:
+          type: string
+          description: Human-readable milestone label (e.g., CREATED, IN_TRANSIT, DELIVERED).
+        status:
+          type: string
+          description: Current status of this milestone.
+        timestamp:
+          type: string
+          format: date-time
+          description: When this milestone occurred (ISO 8601 UTC).
+        location:
+          type: string
+          nullable: true
+          description: Optional location associated with the milestone.
+        isCompleted:
+          type: boolean
+          description: Whether this milestone is completed.
+        isCurrent:
+          type: boolean
+          description: Whether this is the current active milestone.
+    PublicTrackingResponse:
+      type: object
+      required: [trackingNumber, status, originCity, destinationCity, milestones]
+      description: Public shipment tracking response for unauthenticated tracking page.
+      properties:
+        trackingNumber:
+          type: string
+          description: Unique tracking number for the shipment.
+        status:
+          type: string
+          description: Current lifecycle status of the shipment.
+        originCity:
+          type: string
+          description: Human-readable origin city/location name.
+        destinationCity:
+          type: string
+          description: Human-readable destination city/location name.
+        expectedDelivery:
+          type: string
+          format: date-time
+          nullable: true
+          description: Expected delivery timestamp (ISO 8601 UTC), if available.
+        milestones:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicTrackingMilestone'
+          description: Chronological list of tracking milestones.
     MilestoneEvent:
       type: string
       enum:
@@ -6651,8 +7274,16 @@ components:
           description: Associated shipment ObjectId
         eventType:
           $ref: '#/components/schemas/MilestoneEvent'
+        dataHash:
+          type: string
+          nullable: true
+          description: >
+            SHA-256 hex digest of the payload committed by the on-chain transaction.
+            Allows independent verification that `transactionHash` covers the expected data.
+            Present only when the block was created with an associated on-chain anchor.
         transactionHash:
           type: string
+          nullable: true
           description: Stellar transaction hash, if applicable
         actor:
           type: string

@@ -88,6 +88,19 @@ Content-Type: application/json
 - `ERR_EVENTS_POLL_FAILED` (502) — Redis event store unavailable; polling fallback could not retrieve recent events
 - `ERR_VALIDATION_FAILED` (400) — Schema validation failed
 
+### Chain Errors
+Mapped from Soroban contract errors by `chainErrorToAppError()` in `src/shared/types/chain.ts` (spec: `docs/chain-interface.md`). Not yet returned by any endpoint — reserved for the `ChainAdapter` layer (TODO Part 3).
+- `ERR_CHAIN_UNAUTHORIZED` (403) — Contract `NotAuthorized` (1): required signer did not authorize
+- `ERR_CHAIN_INVALID_HASH` (422) — Contract `InvalidHash` (2)
+- `ERR_CHAIN_ALREADY_ANCHORED` (409) — Contract `AlreadyAnchored` (3)
+- `ERR_CHAIN_ESCROW_EXISTS` (409) — Contract `EscrowExists` (4)
+- `ERR_CHAIN_ESCROW_NOT_FOUND` (404) — Contract `EscrowNotFound` (5)
+- `ERR_CHAIN_ESCROW_ALREADY_RELEASED` (409) — Contract `EscrowAlreadyReleased` (6)
+- `ERR_CHAIN_INVALID_AMOUNT` (422) — Contract `InvalidAmount` (7)
+- `ERR_CHAIN_INVALID_PROOF` (422) — Contract `InvalidProof` (8)
+- `ERR_CHAIN_UNKNOWN` (502) — Contract error code not in the spec (spec drift)
+- `ERR_CHAIN_INVALID_EVENT` (502) — Indexed contract event failed spec validation
+
 ### Server Errors
 - `ERR_INTERNAL_SERVER_ERROR` (500) — Unhandled exception
 
@@ -180,6 +193,9 @@ A: No. Always check the `code` field for precise error type identification, as m
 A: No. Error messages are currently English only. Frontend teams should map error codes to localized messages.
 
 ## Changelog
+
+### Version 1.2.0
+- Added `ERR_CHAIN_*` codes — chain spec error taxonomy (#650)
 
 ### Version 1.1.0
 - Added `ERR_AUTH_TOKEN_REVOKED` (401) — revoked JWT error for SSE and all protected endpoints

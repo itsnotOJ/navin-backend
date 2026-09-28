@@ -1,25 +1,23 @@
 /**
  * Reusable ESM mock factories for Jest `unstable_mockModule`.
  *
- * ## ESM mocking pattern
- *
- * Jest hoists `jest.mock()` calls, but native ESM modules require
- * `jest.unstable_mockModule()` which is **not** hoisted. The typical pattern:
+ * ## ESM-safe pattern (required)
  *
  * ```ts
  * import { jest } from '@jest/globals';
- * import { createStellarServiceMock } from './helpers/mocks.js';
  *
- * await jest.unstable_mockModule('../src/services/stellar.service.js', () =>
- *   createStellarServiceMock()
- * );
- *
+ * jest.resetModules();
+ * await jest.unstable_mockModule('../src/services/stellar.service.js', async () => {
+ *   const actual = await jest.requireActual('../src/services/stellar.service.js');
+ *   return { ...actual, ...createStellarServiceMock() };
+ * });
  * // Import the module under test *after* registering mocks
- * const { tokenizeShipment } = await import('../src/services/stellar.service.js');
+ * const mod = await import('../src/services/stellar.service.js');
  * ```
  *
- * Each factory returns a complete module shape so callers never omit a named
- * export that downstream code may import.
+ * Order matters: reset → mock → import. Factories return complete shapes so
+ * callers never omit a named export. Prefer spreading `requireActual` so new
+ * exports fail open instead of breaking 100+ suites.
  */
 import { jest } from '@jest/globals';
 
@@ -97,12 +95,19 @@ export function createUsersModelMock(overrides: Partial<UsersModelMock> = {}): U
       findOne: jest.fn(),
       findById: jest.fn(),
       findByIdAndUpdate: jest.fn(),
+      findOneAndUpdate: jest.fn(),
+      updateOne: jest.fn(),
+      updateMany: jest.fn(),
+      deleteOne: jest.fn(),
+      countDocuments: jest.fn(),
       ...(overrides.UserModel ?? {}),
-    },
+    } as UsersModelMock['UserModel'],
     OrganizationModel: {
       findById: jest.fn(),
+      findOne: jest.fn(),
+      create: jest.fn(),
       ...(overrides.OrganizationModel ?? {}),
-    },
+    } as UsersModelMock['OrganizationModel'],
     UserRole: {
       SUPER_ADMIN: 'SUPER_ADMIN',
       ADMIN: 'ADMIN',
@@ -132,6 +137,7 @@ export function createTelemetryModelMock(
       find: jest.fn(),
       findOne: jest.fn(),
       findByIdAndUpdate: jest.fn(),
+      updateOne: jest.fn(),
       deleteMany: jest.fn(),
       updateMany: jest.fn(),
       ...(overrides.Telemetry ?? {}),
@@ -140,6 +146,7 @@ export function createTelemetryModelMock(
       PENDING_ANCHOR: 'PENDING_ANCHOR',
       ANCHORED: 'ANCHORED',
       ANCHOR_FAILED: 'ANCHOR_FAILED',
+      VERIFIED: 'VERIFIED',
       ...(overrides.TelemetryAnchorStatus ?? {}),
     },
     ...overrides,

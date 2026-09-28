@@ -64,6 +64,7 @@ const EnvSchema = z.object({
   HORIZON_URL: z.string().url('HORIZON_URL must be a valid URL').optional(),
   SOROBAN_RPC_URL: z.string().url('SOROBAN_RPC_URL must be a valid URL').optional(),
   ESCROW_CONTRACT_ID: z.string().min(1).optional(),
+  SOROBAN_ADAPTER: z.enum(['simulated', 'soroban']).default('simulated'),
 
   // Observability
   SENTRY_DSN: z.string().url('SENTRY_DSN must be a valid URL').optional(),

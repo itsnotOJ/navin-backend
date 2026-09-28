@@ -23,8 +23,13 @@ services:
 
   redis:
     image: redis:7-alpine
+    # Durability (H2.4): AOF persistence + named volume so BullMQ jobs
+    # (transaction_queue anchors, alert_queue alerts) survive container restarts.
+    command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -114,3 +119,4 @@ services:
 
 volumes:
   mongo_data:
+  redis_data:

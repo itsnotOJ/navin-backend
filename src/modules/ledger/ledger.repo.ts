@@ -11,6 +11,8 @@ export interface LedgerBlockInput {
   blockNumber?: number;
   timestamp?: Date;
   shipmentReference?: string;
+  /** SHA-256 hex digest of the payload committed by the on-chain transaction. */
+  dataHash?: string;
   transactionHash?: string;
   ledger?: number;
   verified?: boolean;
@@ -32,6 +34,7 @@ export async function createLedgerBlock(input: LedgerBlockInput): Promise<ILedge
     milestoneEvent,
     eventType: input.eventType,
     ...(input.transactionHash && { transactionHash: input.transactionHash }),
+    ...(input.dataHash && { dataHash: input.dataHash }),
     ledger: input.ledger ?? input.blockNumber ?? 0,
     verified: input.verified ?? false,
     ...(input.actor && { actor: input.actor }),

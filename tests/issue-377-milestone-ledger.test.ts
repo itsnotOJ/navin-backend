@@ -73,12 +73,6 @@ jest.unstable_mockModule('../src/services/stellar.service.js', () => ({
   getStellarExplorerUrl: jest.fn(),
 }));
 
-jest.unstable_mockModule('../src/services/mockStorageService.js', () => ({
-  mockUploadToStorage: jest
-    .fn<() => Promise<string>>()
-    .mockResolvedValue('https://mock-storage.com/proof.jpg'),
-}));
-
 jest.unstable_mockModule('../src/modules/payments/payments.repo.js', () => ({
   getPaymentByShipmentId: jest.fn<() => Promise<null>>().mockResolvedValue(null),
   updatePaymentStatus: jest.fn(),
@@ -87,6 +81,8 @@ jest.unstable_mockModule('../src/modules/payments/payments.repo.js', () => ({
 const { updateShipmentStatusService, uploadShipmentProofService } = await import(
   '../src/modules/shipments/shipments.service.js'
 );
+
+const { multerFile } = await import('./fixtures/factories.js');
 
 describe('Ledger block creation on lifecycle events', () => {
   beforeEach(() => {
@@ -140,17 +136,7 @@ describe('Ledger block creation on lifecycle events', () => {
   });
 
   it('proof upload creates a PROOF_SUBMITTED ledger block', async () => {
-    const mockFile = {
-      originalname: 'proof.jpg',
-      buffer: Buffer.from('fake'),
-      mimetype: 'image/jpeg',
-      size: 123,
-      fieldname: 'file',
-      destination: '',
-      filename: 'proof.jpg',
-      path: '',
-      stream: null as unknown as NodeJS.ReadableStream,
-    } as Express.Multer.File;
+    const mockFile = multerFile();
 
     findByIdMock.mockResolvedValue({
       _id: 'ship-1',
@@ -177,6 +163,7 @@ describe('Ledger block creation on lifecycle events', () => {
     (releaseEscrow as jest.MockedFunction<typeof releaseEscrow>).mockResolvedValue({
       success: true,
       transactionHash: 'stellar-tx-hash-abc',
+      simulated: true,
     });
     (paymentsRepo.getPaymentByShipmentId as jest.Mock<(...args: unknown[]) => Promise<unknown>>).mockResolvedValue({
       _id: 'pay-1',
@@ -222,10 +209,11 @@ describe('Ledger block creation on lifecycle events', () => {
 
     findByIdMock.mockResolvedValue(mockShipmentDoc);
 
-    await updateShipmentStatusService('ship-1', 'DELIVERED' as never, {
+    const result = await updateShipmentStatusService('ship-1', 'DELIVERED' as never, {
       userId: 'user-1',
     });
 
+    expect(result).toMatchObject({ simulated: true });
     expect(createLedgerBlockMock).toHaveBeenCalledWith(
       expect.objectContaining({
         shipmentId: 'ship-1',

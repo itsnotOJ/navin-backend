@@ -1,6 +1,6 @@
 import { jest, describe, beforeAll, beforeEach, it, expect } from '@jest/globals';
 import request from 'supertest';
-import jwt from 'jsonwebtoken';
+import { signToken } from './fixtures/factories.js';
 import type { Application } from 'express';
 
 // Mock in-memory DB for shipments
@@ -139,10 +139,6 @@ await jest.unstable_mockModule('../src/modules/users/users.model.js', () => ({
   },
 }));
 
-await jest.unstable_mockModule('../src/services/mockStorageService.js', () => ({
-  mockUploadToStorage: jest.fn(() => Promise.resolve('http://fake-url.com/file')),
-}));
-
 // Mock middleware dependencies
 await jest.unstable_mockModule('../src/shared/middleware/rateLimiter.js', () => ({
   standardLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
@@ -163,7 +159,7 @@ describe('Shipments Search Filters', () => {
 
   beforeAll(async () => {
     app = buildApp();
-    authToken = jwt.sign({ userId: 'test-user-id', role: 'ADMIN' }, process.env.JWT_SECRET!);
+    authToken = signToken({ userId: 'test-user-id', role: 'ADMIN' });
   });
 
   beforeEach(async () => {

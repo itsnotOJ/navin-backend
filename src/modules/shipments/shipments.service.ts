@@ -558,6 +558,7 @@ export const updateShipmentStatusService = async (
   validateStatusTransition(shipment.status as ShipmentStatus, status);
 
   const previousStatus = shipment.status;
+  let simulated: boolean | undefined;
   shipment.status = status;
 
   const milestone = {
@@ -631,6 +632,7 @@ export const updateShipmentStatusService = async (
         });
 
         if (releaseResult.success && releaseResult.transactionHash) {
+          simulated = releaseResult.simulated;
           await paymentsRepo.updatePaymentStatus(
             payment._id.toString(),
             PaymentStatus.RELEASED,
@@ -689,6 +691,12 @@ export const updateShipmentStatusService = async (
     updatedAt:
       shipment.updatedAt instanceof Date ? shipment.updatedAt.toISOString() : shipment.updatedAt,
   });
+
+  if (simulated !== undefined) {
+    const shipmentData =
+      typeof shipment.toObject === 'function' ? shipment.toObject() : { ...shipment };
+    return { ...shipmentData, simulated };
+  }
 
   return shipment;
 };
