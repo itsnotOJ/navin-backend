@@ -1,15 +1,18 @@
 /**
  * Type-level tests for the ChainAdapter port.
- * Not a Jest suite — compiled with the TS compiler by tests/chain.adapter.port.test.ts,
- * which fails on any diagnostic (incl. an unused `@ts-expect-error`).
+ * Not a Jest suite: compiled by `npm run typecheck` (tests/types/tsconfig.json)
+ * and by tests/chain.adapter.port.test.ts, both of which fail on any
+ * diagnostic, including an unused `@ts-expect-error`.
  */
 import { AppError, ErrorCodes } from '../../src/shared/http/errors.js';
+import type { ErrorCode } from '../../src/shared/http/errors.js';
 import type {
   AnchorEventInput,
   AnchorResult,
   ChainAdapter,
   ChainErrorCode,
   ChainEventCursor,
+  ChainTxReceipt,
   EscrowResult,
   ReleaseEscrowInput,
 } from '../../src/services/chain/types.js';
@@ -28,7 +31,60 @@ assertType<Equals<Awaited<ReturnType<ChainAdapter['releaseEscrow']>>, EscrowResu
 assertType<Equals<ReturnType<ChainAdapter['streamEvents']>, AsyncIterable<ChainEvent>>>();
 assertType<Equals<Awaited<ReturnType<ChainAdapter['getConfirmationCount']>>, number>>();
 
+// ─── Method surface: no method added, removed, or made optional silently ────
+type RequiredKeys<T> = { [K in keyof T]-?: object extends Pick<T, K> ? never : K }[keyof T];
+type OptionalKeys<T> = Exclude<keyof T, RequiredKeys<T>>;
+assertType<
+  Equals<
+    RequiredKeys<ChainAdapter>,
+    'anchorEvent' | 'releaseEscrow' | 'streamEvents' | 'getConfirmationCount'
+  >
+>();
+assertType<Equals<OptionalKeys<ChainAdapter>, 'getLatestLedger' | 'getTransactionLedger'>>();
+
+// ─── Method arguments are the chain.ts spec types ───────────────────────────
+assertType<Equals<Parameters<ChainAdapter['anchorEvent']>, [AnchorArgs]>>();
+assertType<Equals<Parameters<ChainAdapter['releaseEscrow']>, [ReleaseEscrowArgs]>>();
+assertType<Equals<Parameters<ChainAdapter['streamEvents']>, [cursor?: ChainEvent['id']]>>();
+assertType<Equals<Parameters<ChainAdapter['getConfirmationCount']>, [number]>>();
+assertType<Equals<ChainAdapter['getLatestLedger'], (() => Promise<number>) | undefined>>();
+assertType<
+  Equals<
+    ChainAdapter['getTransactionLedger'],
+    ((txHash: string) => Promise<number | null>) | undefined
+  >
+>();
+
+// ─── Receipt shapes: exact fields, `simulated` always present ───────────────
+assertType<Equals<keyof ChainTxReceipt, 'txHash' | 'ledger' | 'simulated'>>();
+assertType<Equals<ChainTxReceipt['txHash'], string>>();
+assertType<Equals<ChainTxReceipt['ledger'], number>>();
+assertType<Equals<ChainTxReceipt['simulated'], boolean>>();
+assertType<Equals<RequiredKeys<ChainTxReceipt>, keyof ChainTxReceipt>>();
+assertType<Equals<AnchorResult, ChainTxReceipt>>();
+assertType<Equals<keyof EscrowResult, keyof ChainTxReceipt | 'paymentId'>>();
+assertType<Equals<RequiredKeys<EscrowResult>, keyof EscrowResult>>();
+assertType<Equals<EscrowResult['paymentId'], ReleaseEscrowArgs['payment_id']>>();
+
+// @ts-expect-error — `simulated` is required: a receipt must say whether it is real
+export const unflaggedReceipt: AnchorResult = { txHash: 'a'.repeat(64), ledger: 1 };
+export const labelledReceipt: AnchorResult = {
+  txHash: 'a'.repeat(64),
+  ledger: 1,
+  // @ts-expect-error — `simulated` is a boolean, not a label
+  simulated: 'yes',
+};
+// @ts-expect-error — an escrow receipt must carry the paymentId it released
+export const anonymousRelease: EscrowResult = {
+  txHash: 'a'.repeat(64),
+  ledger: 1,
+  simulated: false,
+};
+
 // ─── Error codes are restricted to ERR_CHAIN_* ──────────────────────────────
+assertType<ChainErrorCode extends ErrorCode ? true : false>();
+assertType<typeof ErrorCodes.CHAIN_UNKNOWN extends ChainErrorCode ? true : false>();
+assertType<typeof ErrorCodes.CHAIN_INVALID_EVENT extends ChainErrorCode ? true : false>();
 const chainCode: ChainErrorCode = ErrorCodes.CHAIN_ESCROW_NOT_FOUND;
 // @ts-expect-error — non-chain codes are not adapter error codes
 const nonChainCode: ChainErrorCode = ErrorCodes.NOT_FOUND;

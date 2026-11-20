@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `npm run typecheck` now also compiles `tests/types/` (via `tests/types/tsconfig.json`), and the ChainAdapter type tests pin every port method's arguments and return type, the required/optional method set, the exact receipt shapes (including the required `simulated` flag) and the `ERR_CHAIN_*` error type (#1062).
 - Three-ledger Stellar confirmation tracking for released payments and telemetry anchors, with immediate confirmations in simulated mode (#838, #837).
 
 **Phase 6 — Hash-and-Emit chain architecture**
