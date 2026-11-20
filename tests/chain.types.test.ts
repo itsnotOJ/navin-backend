@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -5,6 +6,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import { AppError, ErrorCodes } from '../src/shared/http/errors.js';
 import {
+  CHAIN_ABI_SHA256,
   CHAIN_CONTRACT_ERRORS,
   CHAIN_ERROR_MAP,
   CHAIN_EVENT_NAMES,
@@ -49,6 +51,19 @@ describe('chain spec version pin', () => {
     ['errors.json', errors.spec_version],
   ])('%s is pinned to CHAIN_SPEC_VERSION', (_file, version) => {
     expect(version).toBe(CHAIN_SPEC_VERSION);
+  });
+
+  it('CHAIN_SPEC_VERSION is 2.0.0', () => {
+    expect(CHAIN_SPEC_VERSION).toBe('2.0.0');
+  });
+
+  it('the vendored contract ABI matches CHAIN_ABI_SHA256', () => {
+    const abi = readFileSync(
+      join(process.cwd(), 'vendor/navin-contracts/contract-schema.shipment.json')
+    );
+    expect(createHash('sha256').update(abi).digest('hex')).toBe(CHAIN_ABI_SHA256);
+    // Sanity: it is the contract spec (an array of function/type entries).
+    expect(Array.isArray(JSON.parse(abi.toString('utf8')))).toBe(true);
   });
 });
 

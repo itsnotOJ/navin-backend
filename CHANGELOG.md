@@ -107,6 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Corrected Swagger response envelope for `GET /api/anomalies` and `PATCH /api/anomalies/:id/resolve` to match the standard `{ success, message, data, meta? }` shape (#256, #299).
 - Removed `any` types from `analytics.service.ts`, `telemetry.service.ts`, `shipments.controller.ts`, and `users.model.ts`.
 - `docs/environment-variables.md` rewritten as a 1-to-1 mirror of `src/env.schema.ts`, documenting every variable's exact Zod rule, default and conditional requirement (#855).
+- `CHAIN_SPEC_VERSION` bumped to `2.0.0` (chain.ts, golden fixtures, chain-interface.md). The shipment contract ABI is vendored at `vendor/navin-contracts/contract-schema.shipment.json` and its sha256 pinned as `CHAIN_ABI_SHA256`; `tests/chain.types.test.ts` now asserts both the spec version and the ABI checksum (#1045).
 
 ### Removed
 

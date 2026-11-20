@@ -2,7 +2,7 @@
  * Chain interface — typed mirror of docs/chain-interface.md (TODO I2).
  *
  * ┌──────────────────────────────────────────────────────────────────────┐
- * │ SPEC VERSION: 1.0.0-draft  (see CHAIN_SPEC_VERSION below)            │
+ * │ SPEC VERSION: 2.0.0  (see CHAIN_SPEC_VERSION below)                  │
  * │ Mirrors the v1 surface defined by P6-01 (#649) / TODO I1:            │
  * │   functions  anchor · init_escrow · release_escrow (+ authz)         │
  * │   events     anchor · esc_init · esc_rel (topic + data tuples)       │
@@ -25,7 +25,17 @@ import { z } from 'zod';
 import { AppError, ErrorCodes } from '../http/errors.js';
 import type { ErrorCode } from '../http/errors.js';
 
-export const CHAIN_SPEC_VERSION = '1.0.0-draft' as const;
+export const CHAIN_SPEC_VERSION = '2.0.0' as const;
+
+/**
+ * sha256 of the vendored shipment-contract ABI,
+ * vendor/navin-contracts/contract-schema.shipment.json (copied byte-for-byte
+ * from Navin-xmr/navin-contracts docs/contract-schema.shipment.json @
+ * 35509051a03c). tests/chain.types.test.ts fails when the file and this value
+ * disagree, so re-vendoring the ABI is always an explicit change here.
+ */
+export const CHAIN_ABI_SHA256 =
+  'c9e3f506eba5b78a488e4a0b405dfb561786d2775d6c1a0a3380c4d55cdc094f' as const;
 
 // ─── Soroban primitives ──────────────────────────────────────────────────────
 
