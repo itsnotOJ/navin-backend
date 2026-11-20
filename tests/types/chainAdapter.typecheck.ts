@@ -31,7 +31,11 @@ assertType<Equals<Awaited<ReturnType<ChainAdapter['releaseEscrow']>>, EscrowResu
 assertType<Equals<ReturnType<ChainAdapter['streamEvents']>, AsyncIterable<ChainEvent>>>();
 assertType<Equals<Awaited<ReturnType<ChainAdapter['getConfirmationCount']>>, number>>();
 
-// ─── Method surface: no method added, removed, or made optional silently ────
+// ─── Method surface ─────────────────────────────────────────────────────────
+// The required set is exact: adding, removing or loosening a required method
+// breaks every adapter, so it must be a deliberate change here. Optional
+// methods may be added freely (implementers are unaffected), but the existing
+// ones must stay optional.
 type RequiredKeys<T> = { [K in keyof T]-?: object extends Pick<T, K> ? never : K }[keyof T];
 type OptionalKeys<T> = Exclude<keyof T, RequiredKeys<T>>;
 assertType<
@@ -40,7 +44,9 @@ assertType<
     'anchorEvent' | 'releaseEscrow' | 'streamEvents' | 'getConfirmationCount'
   >
 >();
-assertType<Equals<OptionalKeys<ChainAdapter>, 'getLatestLedger' | 'getTransactionLedger'>>();
+assertType<
+  'getLatestLedger' | 'getTransactionLedger' extends OptionalKeys<ChainAdapter> ? true : false
+>();
 
 // ─── Method arguments are the chain.ts spec types ───────────────────────────
 assertType<Equals<Parameters<ChainAdapter['anchorEvent']>, [AnchorArgs]>>();
